@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS service_repo_map (
 -- e.g. ('checkout-service', 'your-org/checkout-service', NULL, 'main').
 INSERT INTO service_repo_map (service_name, repo, path_prefix, default_branch)
 VALUES
-    ('cricket-fever', 'TaherVora/cricket-fever', NULL, 'main'),
+    ('cricket-fever', 'TaherVora/cricket-fever', NULL, 'master'),
     ('beer-service', 'TaherVora/Beer-service', NULL, 'master')
 ON CONFLICT (service_name) DO NOTHING;
 

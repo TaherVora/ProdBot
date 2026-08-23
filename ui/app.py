@@ -2,7 +2,9 @@
 Streamlit demo for the error bot POC.
 
 Three tabs:
-  - Submit an error: paste/edit a log by hand, run it through the real
+  - Submit an error: paste a raw GCP Cloud Logging LogEntry JSON payload
+    (the same shape the Pub/Sub push ingest service receives — see
+    integrations.gcp.parse_pubsub_log_entry), run it through the real
     pipeline (embed -> dedup check -> reuse | GitHub retrieval -> Claude),
     see exactly what the bot decided and why.
   - History: everything stored in Postgres so far, most recent first.
@@ -11,6 +13,7 @@ Three tabs:
 Run with: streamlit run ui/app.py
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -22,97 +25,42 @@ import streamlit as st
 import analytics
 import pipeline
 from db import store as db
+from integrations import gcp
 
 st.set_page_config(page_title="Error Bot — Demo", page_icon="🛠️", layout="wide")
 
-SAMPLE_LOGS = {
-    "Container failed Cloud Run port binding": {
-        "raw_log": (
-            "Cloud Run: Container failed to start and listen on the port defined by the PORT "
-            "environment variable within the allocated timeout. Default STARTUP TCP probe failed "
-            "1 time consecutively for container \"beer-service-1\" on port 8080. Reason: connection "
-            "refused. Application is bound to port 8082 (server.port=8082 in application.properties), "
-            "not $PORT (8080), which Cloud Run requires."
-        ),
-        "error_type": "startup-timeout",
-        "endpoint": "",
-        "service_name": "beer-service",
-        "filename": None,
-        "line": None,
-    },
-    "In-memory H2 data lost / inconsistent across instances": {
-        "raw_log": (
-            "java.lang.RuntimeException at BeerServiceImpl.getById - beer not found after autoscale "
-            "event. Cause: H2 is an in-memory DB re-seeded from data.sql on every cold start; Cloud "
-            "Run's stateless, multi-instance/scale-to-zero model means a beer created via one "
-            "instance doesn't exist on another, and NotFoundException has no @ExceptionHandler "
-            "mapping so it surfaces as an unhandled 500."
-        ),
-        "error_type": "500",
-        "endpoint": "/api/v1/beer/{beerId}",
-        "service_name": "beer-service",
-        "filename": "BeerServiceImpl.java",
-        "line": 21,
-    },
-    "Unhandled NotFoundException returns 500 instead of 404": {
-        "raw_log": (
-            "java.lang.RuntimeException: com.taher.beerservice.web.controller.NotFoundException "
-            "(no message). Cause: NotFoundException extends RuntimeException with no @ResponseStatus "
-            "and no @ExceptionHandler in MvcExceptionHandler.java (which only catches "
-            "ConstraintViolationException), so Spring's default resolver falls back to 500 instead "
-            "of the intended 404."
-        ),
-        "error_type": "500",
-        "endpoint": "/api/v1/beer/026cc3c8-3a0c-4083-a05b-e908048c1b08",
-        "service_name": "beer-service",
-        "filename": "BeerServiceImpl.java",
-        "line": 21,
-    },
-    "POST /api/v1/beer 404 due to strict trailing-slash matching (Spring Boot 3)": {
-        "raw_log": (
-            "404 No endpoint POST /api/v1/beer. org.springframework.web.servlet.NoHandlerFoundException: "
-            "No handler found for POST /api/v1/beer. Cause: BeerController.java declares "
-            "@PostMapping(\"/\") (matches only /api/v1/beer/). Spring Framework 6 / Boot 3.0.0-M3 "
-            "(see pom.xml) disabled default trailing-slash matching, so clients or a GCP load "
-            "balancer / API Gateway route that strips the trailing slash now get a 404."
-        ),
-        "error_type": "404",
-        "endpoint": "/api/v1/beer",
-        "service_name": "beer-service",
-        "filename": "BeerController.java",
-        "line": None,
-    },
-    "Malformed UUID path variable causes 400": {
-        "raw_log": (
-            "Failed to convert value of type 'java.lang.String' to required type 'java.util.UUID'; "
-            "nested exception is java.lang.IllegalArgumentException: Invalid UUID string: "
-            "not-a-real-uuid. Cause: no custom binder/validation on the {beerId} path variable; any "
-            "unsanitized path segment passed through by an upstream GCP proxy triggers this."
-        ),
-        "error_type": "400",
-        "endpoint": "/api/v1/beer/not-a-real-uuid",
-        "service_name": "beer-service",
-        "filename": "BeerController.java",
-        "line": 21,
-    },
-    "Duplicate UPC violates unique constraint, surfaces as unhandled 500": {
-        "raw_log": (
-            "org.springframework.dao.DataIntegrityViolationException: could not execute statement "
-            "[Unique index or primary key violation: \"UK_BEER_UPC ON PUBLIC.BEER(UPC) VALUES "
-            "( /* 1 */ '0631234200036' )\"]. Cause: client POSTed a beer with upc='0631234200036', "
-            "which already exists (seeded by data.sql for 'Mango Bobs'). Beer.java declares "
-            "@Column(unique = true) on upc, but nothing catches the resulting "
-            "DataIntegrityViolationException, so it falls through to a generic 500 instead of a 409 "
-            "Conflict."
-        ),
-        "error_type": "500",
-        "endpoint": "/api/v1/beer/",
-        "service_name": "beer-service",
-        "filename": "BeerServiceImpl.java",
-        "line": 27,
-    },
-
-}
+EXAMPLE_PAYLOAD = """{
+  "httpRequest": {
+    "requestMethod": "GET",
+    "requestUrl": "https://cricket-fever-68175716613.us-central1.run.app/debug/error",
+    "status": 404
+  },
+  "insertId": "6a8a3139000437e84a3b1c91",
+  "jsonPayload": {
+    "filename": "RequestLoggingFilter.java",
+    "thread": "http-nio-8080-exec-4",
+    "logger": "io.javabrains.ipldashboard.config.RequestLoggingFilter",
+    "line": 42,
+    "message": "GET /debug -> 404 (2 ms)"
+  },
+  "resource": {
+    "type": "cloud_run_revision",
+    "labels": {
+      "revision_name": "cricket-fever-00005-f6q",
+      "location": "us-central1",
+      "service_name": "cricket-fever",
+      "configuration_name": "cricket-fever",
+      "project_id": "infoservices-hackathon-26"
+    }
+  },
+  "timestamp": "2026-08-22T23:31:05.277Z",
+  "severity": "WARNING",
+  "labels": {
+    "instanceId": "00a41e8c1dae99cfdbff8e0f10485e41e6b2e67292ddf5123967f2342483ce3b9996eb1cbff414c963e5b557ac926328e320396d5d12352f8596c7db11ca2d0131d4c9502a1e76285354b0e4c0baf1"
+  },
+  "logName": "projects/infoservices-hackathon-26/logs/run.googleapis.com%2Fstdout",
+  "receiveTimestamp": "2026-08-22T23:31:05.375012680Z"
+}"""
 
 
 st.title("🛠️ Error Bot — Demo")
@@ -122,55 +70,44 @@ tab_submit, tab_history, tab_analysis = st.tabs(["Submit an error", "History", "
 
 # ---------------------------------------------------------------- Submit ---
 with tab_submit:
-    st.subheader("Load a sample or paste your own")
-
-    sample_choice = st.selectbox(
-        "Sample logs", ["(none — write my own)"] + list(SAMPLE_LOGS.keys())
+    st.subheader("Paste a GCP log entry")
+    st.caption(
+        "Same JSON shape as a Cloud Logging LogEntry / Pub/Sub push payload — "
+        "httpRequest, jsonPayload, resource, severity, etc."
     )
-    sample = SAMPLE_LOGS.get(sample_choice, {})
+    with st.expander("Example payload"):
+        st.code(EXAMPLE_PAYLOAD, language="json")
 
-    service_name = st.text_input(
-        "Cloud Run service name", value=sample.get("service_name", "amaz-clone"),
-        help="Must match a row in service_repo_map, or code retrieval falls back to no context."
-    )
+    payload_text = st.text_area("Log entry JSON", height=320, placeholder=EXAMPLE_PAYLOAD)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        error_type = st.text_input("Error type / status code", value=sample.get("error_type", ""))
-    with col2:
-        endpoint = st.text_input("Endpoint / service", value=sample.get("endpoint", ""))
-
-    raw_log = st.text_area("Raw log message", value=sample.get("raw_log", ""), height=80)
-
-    col3, col4 = st.columns(2)
-    with col3:
-        filename = st.text_input(
-            "Filename (optional)", value=sample.get("filename") or "",
-            help="jsonPayload.filename — used as Tier 1 for GitHub code retrieval.",
-        )
-    with col4:
-        line = st.number_input(
-            "Line (optional)", value=sample.get("line") or 0, min_value=0, step=1,
-            help="jsonPayload.line — passed to the agent as the reported failure location.",
-        )
-
-    submitted = st.button("Run through the bot", type="primary", disabled=not raw_log.strip())
+    submitted = st.button("Run through the bot", type="primary", disabled=not payload_text.strip())
 
     if submitted:
-        log = {
-            "raw_log": raw_log.strip(),
-            "error_type": error_type.strip() or None,
-            "endpoint": endpoint.strip() or None,
-            "filename": filename.strip() or None,
-            "line": int(line) or None,
-            "service_name": service_name.strip() or None,
-        }
-        with st.spinner("Embedding, checking for duplicates, and diagnosing…"):
+        log = None
+        try:
+            entry = json.loads(payload_text)
+        except json.JSONDecodeError as e:
+            st.error(f"Invalid JSON: {e}")
+        else:
             try:
-                result = pipeline.process_log(log)
+                log = gcp.parse_pubsub_log_entry(entry)
             except Exception as e:
-                st.error(f"Pipeline failed: {e}")
-                result = None
+                st.error(f"Could not parse log entry: {e}")
+            else:
+                if log is None:
+                    st.warning(
+                        "Nothing usable extracted from this entry — either its severity is "
+                        "below WARNING, or it has no message/httpRequest to work with."
+                    )
+
+        result = None
+        if log:
+            with st.spinner("Embedding, checking for duplicates, and diagnosing…"):
+                try:
+                    result = pipeline.process_log(log)
+                except Exception as e:
+                    st.error(f"Pipeline failed: {e}")
+                    result = None
 
         if result and result["status"] == "duplicate":
             st.info(
@@ -184,7 +121,7 @@ with tab_submit:
         elif result and result["status"] == "new":
             st.success(f"**New error** — stored as row `{result['id']}`")
             if not result.get("repo"):
-                st.warning(f"No `service_repo_map` entry for `{service_name}` — no code context was available.")
+                st.warning(f"No `service_repo_map` entry for `{log.get('service_name')}` — no code context was available.")
             if result["source_file"]:
                 st.markdown(f"**Code context:** 🟢 grounded — `{result['source_file']}` in `{result['repo']}`")
             else:
