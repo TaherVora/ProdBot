@@ -93,20 +93,30 @@ against each other.
 
 ## How code retrieval works
 
-Three tiers, capped so it never scans the whole repo (`integrations/github.py`):
+A cheap deterministic seed step (`integrations/github.py`), then a bounded
+agentic tool-calling loop (`integrations/github_agent.py`) that can pull in
+more files than just the one the seed step found:
 
-1. Stack trace names a file directly → fetch that file.
-2. No file path, but a function/service name is present → GitHub code
-   search, capped to `MAX_SEARCH_RESULTS` files.
-3. Neither → no code context. The model is told explicitly and gives a
-   general, pattern-based suggestion rather than guessing at code it
-   hasn't seen. This is recorded in `context_used = 'none'` so you can
-   tell grounded fixes apart from general ones later.
+1. **Seed** — stack trace names a file directly → fetch that file; else a
+   function/service name is present → one GitHub code search, capped to
+   `MAX_SEARCH_RESULTS` files; else no seed file.
+2. **Agentic loop** — the model gets read-only tools (`get_file_contents`,
+   `find_file_by_name`, `list_directory`, `search_code`, all scoped to the
+   one repo already resolved for this service) and decides what else it
+   needs — repository/DTO files a fix also touches, files it has to search
+   for because the seed step found nothing, in any language, not just
+   JVM imports. Bounded by `MAX_TOOL_CALL_ROUNDS`, `MAX_FILES_PER_ERROR`, and
+   `GITHUB_AGENT_TIMEOUT_SECONDS` so it can't run away.
+3. If nothing was found at all, the model is told explicitly and gives a
+   general, pattern-based suggestion rather than guessing at code it hasn't
+   seen. Every file actually used is stored per-error in `source_files`
+   (Postgres array column) and shown in the demo UI.
 
 ## Not in this POC (by design)
 
-- Pub/Sub push ingestion — `integrations/gcp.py` is a one-shot poll; run it on a
-  cron or trigger it manually.
 - Slack/email notification — results just print to stdout for now.
-- MCP-based GitHub access — retrieval is a plain deterministic script per
-  the discussion above; revisit if trace-to-file mapping gets unreliable.
+- Real MCP protocol / hosted GitHub MCP server — retrieval gives the model
+  equivalent read-only tool-calling capability (search/list/fetch, scoped to
+  one repo) without a separate MCP client/subprocess/transport; revisit if
+  the tool surface needs to grow beyond read-only code retrieval (issues,
+  PRs, commits, etc).

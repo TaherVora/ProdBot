@@ -39,12 +39,17 @@ CREATE TABLE IF NOT EXISTS error_logs (
     -- what the agent produced
     suggested_solution  TEXT,
     source_file         TEXT,               -- github path resolved from `filename`/search, if any
+    source_files        TEXT[],             -- every file the retrieval step (seed + agentic tool loop) pulled in; source_file is source_files[1] when non-null
 
     -- cost-saving bookkeeping
     occurrence_count    INT NOT NULL DEFAULT 1,
     first_seen          TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Safe to re-run against a database created before source_files existed
+-- (CREATE TABLE IF NOT EXISTS above is a no-op once the table already exists).
+ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS source_files TEXT[];
 
 -- Approximate nearest-neighbor index for cosine distance search.
 -- ivfflat needs a rebuild (REINDEX) once you have real data volume; fine as-is for a POC.

@@ -34,27 +34,35 @@ def _line_numbered(code: str) -> str:
 
 
 def generate_solution(
-    raw_log: str, code: str | None, source_file: str | None,
-    related_files: list[dict] | None = None, service_name: str | None = None,
-    reported_line: int | None = None,
-) -> str:
-    related_files = related_files or []
+    raw_log: str, files: list[dict] | None, primary_source_file: str | None = None,
+    service_name: str | None = None, reported_line: int | None = None,
+) -> dict:
+    """
+    Returns {"solution": str, "prompt_tokens": int, "completion_tokens": int}
+
+    `files` is the flattened list the agentic retrieval loop assembled
+    (integrations/github_agent.py's gather_code_context) — no more
+    primary/related split, since the model decided its own file set.
+    `primary_source_file`, if set, is ordered first for the "Line <N>:"
+    citation instruction below.
+    """
+    files = files or []
+    if primary_source_file:
+        files = sorted(files, key=lambda f: f["source_file"] != primary_source_file)
 
     parts = [f"Service: {service_name or 'unknown'}", f"Error log:\n{raw_log}"]
     if reported_line:
         parts.append(f"Reported at line: {reported_line}")
-    if code:
-        parts.append(f"Primary file ({source_file}), line-numbered:\n{_line_numbered(code)}")
-        for rel in related_files:
-            parts.append(
-                f"Related file ({rel['source_file']}), line-numbered:\n{_line_numbered(rel['code'])}"
-            )
+    if files:
+        for f in files:
+            label = "Primary file" if f["source_file"] == primary_source_file else "Related file"
+            parts.append(f"{label} ({f['source_file']}), line-numbered:\n{_line_numbered(f['code'])}")
     else:
         parts.append("No source code could be located for this error.")
 
     log.info(
-        "generate_solution: service=%r source_file=%r code_provided=%s related_files=%s",
-        service_name, source_file, code is not None, [r["source_file"] for r in related_files],
+        "generate_solution: service=%r primary_source_file=%r files=%s",
+        service_name, primary_source_file, [f["source_file"] for f in files],
     )
 
     response = _client.chat.completions.create(
@@ -66,8 +74,16 @@ def generate_solution(
         ],
     )
     solution = response.choices[0].message.content
+    prompt_tokens = response.usage.prompt_tokens if response.usage else 0
+    completion_tokens = response.usage.completion_tokens if response.usage else 0
 
-    if source_file:
-        files_considered = ", ".join(f"`{f}`" for f in [source_file] + [r["source_file"] for r in related_files])
+    if response.usage:
+        log.info(
+            "generate_solution: service=%r tokens: prompt=%d completion=%d total=%d",
+            service_name, prompt_tokens, completion_tokens, response.usage.total_tokens,
+        )
+
+    if files:
+        files_considered = ", ".join(f"`{f['source_file']}`" for f in files)
         solution = f"**Files considered:** {files_considered}\n\n{solution}"
-    return solution
+    return {"solution": solution, "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}

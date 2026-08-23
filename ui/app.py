@@ -122,8 +122,9 @@ with tab_submit:
             st.success(f"**New error** — stored as row `{result['id']}`")
             if not result.get("repo"):
                 st.warning(f"No `service_repo_map` entry for `{log.get('service_name')}` — no code context was available.")
-            if result["source_file"]:
-                st.markdown(f"**Code context:** 🟢 grounded — `{result['source_file']}` in `{result['repo']}`")
+            if result["source_files"]:
+                files = ", ".join(f"`{f}`" for f in result["source_files"])
+                st.markdown(f"**Code context:** 🟢 grounded — {files} in `{result['repo']}`")
             else:
                 st.markdown("**Code context:** 🔴 ungrounded")
             st.markdown("**Suggested solution:**")
@@ -154,6 +155,9 @@ with tab_history:
                     reported = f"{row['filename']}:{row['line']}"
                 c2.markdown(f"**Reported at:** {reported}")
                 c3.markdown(f"**Source file:** {row['source_file'] or '—'}")
+                if row.get("source_files") and len(row["source_files"]) > 1:
+                    others = ", ".join(f"`{f}`" for f in row["source_files"])
+                    st.markdown(f"**All files considered:** {others}")
                 st.markdown("**Raw log:**")
                 st.code(row["raw_log"])
                 st.markdown("**Suggested solution:**")

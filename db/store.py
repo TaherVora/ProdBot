@@ -120,7 +120,7 @@ def increment_occurrence(error_id: int):
 def list_errors(limit: int = 100):
     query = """
         SELECT id, service_name, repo, raw_log, error_type, endpoint, filename, line,
-               source_file, suggested_solution, occurrence_count, first_seen, last_seen
+               source_file, source_files, suggested_solution, occurrence_count, first_seen, last_seen
         FROM error_logs
         ORDER BY last_seen DESC
         LIMIT %s;
@@ -134,18 +134,18 @@ def list_errors(limit: int = 100):
 
 def insert_error(raw_log, error_type, endpoint, filename, line, embedding,
                   suggested_solution, source_file,
-                  service_name=None, repo=None):
+                  service_name=None, repo=None, source_files=None):
     query = """
         INSERT INTO error_logs
             (service_name, repo, raw_log, error_type, endpoint, filename, line,
-             embedding, suggested_solution, source_file)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             embedding, suggested_solution, source_file, source_files)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id;
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, (
                 service_name, repo, raw_log, error_type, endpoint, filename, line,
-                embedding, suggested_solution, source_file,
+                embedding, suggested_solution, source_file, source_files,
             ))
             return cur.fetchone()[0]

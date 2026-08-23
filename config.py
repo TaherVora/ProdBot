@@ -25,10 +25,16 @@ LOG_LOOKBACK_MINUTES = int(os.getenv("LOG_LOOKBACK_MINUTES", "15"))
 
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.15"))
 
-# Hard caps so a Tier 2 code search can never balloon into scanning the repo.
+# Hard caps so a search_code tool call can never balloon into scanning the repo.
 MAX_SEARCH_RESULTS = 10
 MAX_FILE_CHARS = 6000  # per file, truncate large files before sending to the model
 
-# Cap on how many same-project files (repository/DTO/etc. that the primary
-# file imports) get pulled in as extra grounding for the fix.
-MAX_RELATED_FILES = 3
+# Bounds for the agentic GitHub tool-calling loop (integrations/github_agent.py).
+MAX_TOOL_CALL_ROUNDS = int(os.getenv("MAX_TOOL_CALL_ROUNDS", "4"))
+MAX_FILES_PER_ERROR = int(os.getenv("MAX_FILES_PER_ERROR", "6"))
+GITHUB_AGENT_TIMEOUT_SECONDS = int(os.getenv("GITHUB_AGENT_TIMEOUT_SECONDS", "60"))
+
+# When no filename resolves, how many repo file paths to show the model up
+# front (cheap — one deterministic Trees API call, no LLM round trip) so it
+# picks from real filenames instead of guessing.
+MAX_TREE_FILES_IN_PROMPT = int(os.getenv("MAX_TREE_FILES_IN_PROMPT", "300"))

@@ -22,9 +22,13 @@ def normalize_error_text(error_type: str, endpoint: str, message: str) -> str:
     return " | ".join(parts)
 
 
-def get_embedding(text: str) -> list[float]:
+def get_embedding(text: str) -> tuple[list[float], int]:
+    """Returns (embedding, tokens_used) — the token count lets callers roll
+    embedding cost into a per-call total alongside the chat-completion costs
+    in integrations/github_agent.py and agent.py."""
     result = _client.embeddings.create(
         input=[text],
         model=config.OPENAI_EMBEDDING_MODEL,
     )
-    return result.data[0].embedding
+    tokens_used = result.usage.total_tokens if result.usage else 0
+    return result.data[0].embedding, tokens_used
