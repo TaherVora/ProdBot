@@ -76,10 +76,13 @@ _TOOLS = [
         "function": {
             "name": "list_directory",
             "description": (
-                "List files under a directory path in the repo (non-recursive by "
-                "default). Use this to explore project structure when you don't know "
-                "an exact filename, e.g. to see what's in the same package/directory "
-                "as a file you already have."
+                "List entries under a directory path in the repo (non-recursive by "
+                "default). Entries ending in '/' are subdirectories — call "
+                "list_directory again on those to go deeper; entries without a "
+                "trailing '/' are files — pass those straight to get_file_contents. "
+                "Use this to explore project structure when you don't know an exact "
+                "filename, e.g. to see what's in the same package/directory as a "
+                "file you already have."
             ),
             "parameters": {
                 "type": "object",
@@ -168,12 +171,30 @@ def _make_dispatch(repo: str, branch: str, path_prefix: str | None, state: dict,
         paths = _tree()
         if prefix:
             paths = [p for p in paths if p.startswith(prefix + "/") or p == prefix]
-        if not recursive:
-            paths = [p for p in paths if "/" not in p[len(prefix):].lstrip("/")]
-        paths = paths[: config.MAX_SEARCH_RESULTS]
-        if not paths:
+        if recursive:
+            entries = list(paths)
+        else:
+            # _tree() only holds file (blob) paths, so collapse each match down to
+            # its immediate child under `prefix` — a file's full path as-is, or a
+            # subdirectory's full path with a trailing "/" — instead of filtering
+            # to only paths with zero further nesting, which would hide every
+            # subdirectory name and make it impossible to descend into the tree.
+            entries: list[str] = []
+            seen: set[str] = set()
+            for p in paths:
+                rest = p[len(prefix):].lstrip("/")
+                if not rest:
+                    continue
+                head = rest.split("/", 1)[0]
+                full = f"{prefix}/{head}" if prefix else head
+                entry = f"{full}/" if "/" in rest else full
+                if entry not in seen:
+                    seen.add(entry)
+                    entries.append(entry)
+        entries = entries[: config.MAX_SEARCH_RESULTS]
+        if not entries:
             return {"path": path, "entries": [], "error": "empty or not found"}
-        return {"path": path, "entries": paths}
+        return {"path": path, "entries": entries}
 
     def search_code(query: str) -> dict:
         rate_limited_detail = (
@@ -235,29 +256,37 @@ def gather_code_context(
     state = {"search_disabled": False}
     context_header = f"Service: {service_name or 'unknown'}\nError log:\n{message}"
 
+    # Always fetch the tree and hand it to the model directly — a seed file
+    # match isn't proof the seed is actually relevant to the error (e.g. a
+    # bare filename from a log can resolve to an unrelated bootstrap/config
+    # class), so the model needs the full listing either way to pick further
+    # files itself instead of discovering repo structure blind, one
+    # list_directory/find_file_by_name round at a time.
+    tree = github._list_repo_files(repo, branch)
+    if path_prefix:
+        tree = [p for p in tree if p.startswith(path_prefix)]
+    dispatch = _make_dispatch(repo, branch, path_prefix, state, tree_cache=tree)
+
+    tree_listing = "\n".join(tree[: config.MAX_TREE_FILES_IN_PROMPT])
+    truncation_note = ""
+    if len(tree) > config.MAX_TREE_FILES_IN_PROMPT:
+        truncation_note = f"\n... ({len(tree) - config.MAX_TREE_FILES_IN_PROMPT} more file(s) not shown)"
+
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
     if files:
         seed_text = "\n\n".join(
             f"Already fetched via filename match ({f['source_file']}):\n{f['code']}" for f in files
         )
-        dispatch = _make_dispatch(repo, branch, path_prefix, state)
-        messages.append({"role": "user", "content": f"{context_header}\n\n{seed_text}"})
+        messages.append({
+            "role": "user",
+            "content": f"{context_header}\n\n{seed_text}\n\nRepo file listing — if the file(s) above "
+                       f"don't fully explain or fix this error, pick any other file(s) you need "
+                       f"straight from here with get_file_contents using the exact path shown, "
+                       f"rather than exploring blind:\n{tree_listing}{truncation_note}",
+        })
     else:
         # No filename resolved — don't make the model guess filenames blind (it
-        # has no idea what language/framework this repo even uses). Fetch the
-        # tree once here and both hand it to the model directly and reuse it as
-        # the cache for find_file_by_name/list_directory, instead of the model
-        # burning rounds guessing bare words ("team", "Pune", "team.js" ...)
-        # into find_file_by_name and getting "no matches" every time.
-        tree = github._list_repo_files(repo, branch)
-        if path_prefix:
-            tree = [p for p in tree if p.startswith(path_prefix)]
-        dispatch = _make_dispatch(repo, branch, path_prefix, state, tree_cache=tree)
-
-        tree_listing = "\n".join(tree[: config.MAX_TREE_FILES_IN_PROMPT])
-        truncation_note = ""
-        if len(tree) > config.MAX_TREE_FILES_IN_PROMPT:
-            truncation_note = f"\n... ({len(tree) - config.MAX_TREE_FILES_IN_PROMPT} more file(s) not shown)"
+        # has no idea what language/framework this repo even uses).
         messages.append({
             "role": "user",
             "content": f"{context_header}\n\nNo file could be resolved automatically from the "
