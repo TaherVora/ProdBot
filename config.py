@@ -38,3 +38,13 @@ GITHUB_AGENT_TIMEOUT_SECONDS = int(os.getenv("GITHUB_AGENT_TIMEOUT_SECONDS", "60
 # front (cheap — one deterministic Trees API call, no LLM round trip) so it
 # picks from real filenames instead of guessing.
 MAX_TREE_FILES_IN_PROMPT = int(os.getenv("MAX_TREE_FILES_IN_PROMPT", "300"))
+
+# Build-tool/wrapper/doc noise stripped from the repo tree before it ever
+# reaches a prompt — these could never plausibly be the file a fix needs.
+TREE_EXCLUDE_PREFIXES = (
+    ".git/", ".mvn/", ".idea/", ".vscode/", "target/", "build/", "node_modules/", "dist/",
+)
+TREE_EXCLUDE_FILENAMES = {
+    "mvnw", "mvnw.cmd", "gradlew", "gradlew.bat", ".gitignore", ".gitattributes",
+    "HELP.md", "LICENSE",
+}
