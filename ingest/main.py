@@ -2,7 +2,7 @@
 Pub/Sub push receiver for cricket-fever error events.
 
 The subscription is fed by a Cloud Logging sink filtered to severity >=
-WARNING, so each Pub/Sub message's data is a raw LogEntry JSON blob (the same
+ERROR, so each Pub/Sub message's data is a raw LogEntry JSON blob (the same
 shape Cloud Logging's API returns) rather than a custom payload — see
 integrations.gcp.parse_pubsub_log_entry for the two shapes that show up
 (an application jsonPayload log carrying message/filename/line, and a
