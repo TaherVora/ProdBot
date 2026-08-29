@@ -26,7 +26,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
 import pipeline
-from integrations import gcp
+from integrations import gcp, notify
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ingest")
@@ -57,6 +57,7 @@ async def pubsub_push(request: Request):
         logger.exception("pipeline.process_log failed for message %s", message.get("messageId"))
         return Response(status_code=500)
 
+    notify.notify(result, log)
     logger.info("Processed message %s: %s", message.get("messageId"), result["status"])
     return Response(status_code=204)
 

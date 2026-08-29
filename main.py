@@ -1,5 +1,5 @@
 import pipeline
-from integrations import gcp
+from integrations import gcp, notify
 
 
 def run():
@@ -8,6 +8,7 @@ def run():
 
     for log in logs:
         result = pipeline.process_log(log)
+        notify.notify(result, log)
 
         if result["status"] == "duplicate":
             print(
