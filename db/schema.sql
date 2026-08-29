@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS error_logs (
     line                INT,                -- line number reported by the app (jsonPayload.line)
 
     -- dedup
-    embedding           vector(1536) NOT NULL,
+    embedding           vector(3072) NOT NULL,  -- text-embedding-3-large
 
     -- what the agent produced
     suggested_solution  TEXT,
@@ -59,9 +59,22 @@ ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS source_files TEXT[];
 ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS resolution_tier TEXT NOT NULL DEFAULT 'new';
 ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS reference_error_id INT REFERENCES error_logs(id);
 
--- Approximate nearest-neighbor index for cosine distance search.
--- ivfflat needs a rebuild (REINDEX) once you have real data volume; fine as-is for a POC.
-CREATE INDEX IF NOT EXISTS error_logs_embedding_idx
-    ON error_logs USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+-- Switching to text-embedding-3-large (3072-dim) from text-embedding-3-small
+-- (1536-dim) — existing embeddings are incompatible at a different
+-- dimension, so this is a clean cutover: clear old rows, drop the old index
+-- (built for 1536 dims — see note below on why it's not rebuilt), widen the
+-- column. No-op on a fresh database (table is already created at 3072 dims
+-- above, nothing to truncate/alter).
+TRUNCATE TABLE error_logs;
+DROP INDEX IF EXISTS error_logs_embedding_idx;
+ALTER TABLE error_logs ALTER COLUMN embedding TYPE vector(3072);
+
+-- No vector index on `embedding` while it's 3072-dim (text-embedding-3-large):
+-- pgvector's ivfflat/hnsw indexes cap out at 2000 dimensions for the plain
+-- `vector` type (storage itself has no such limit, only indexing does).
+-- Cosine search falls back to a sequential scan + sort, which is fine at POC
+-- row counts. To get an index back at this dimension you'd need pgvector's
+-- `halfvec` type (0.7.0+) with an HNSW/ivfflat index on halfvec_cosine_ops —
+-- worth it only once real data volume makes the sequential scan slow.
 
 CREATE INDEX IF NOT EXISTS error_logs_service_idx ON error_logs (service_name);
