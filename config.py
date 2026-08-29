@@ -21,10 +21,10 @@ OPENAI_ADAPT_MODEL = os.getenv("OPENAI_ADAPT_MODEL", "gpt-4.1-mini")
 GITHUB_TOKEN = _require("GITHUB_TOKEN")
 
 GCP_PROJECT_ID = _require("GCP_PROJECT_ID")
-CLOUD_RUN_SERVICE = os.getenv("CLOUD_RUN_SERVICE", "voc-trending")
+CLOUD_RUN_SERVICE = os.getenv("CLOUD_RUN_SERVICE", "cricket-fever")
 LOG_LOOKBACK_MINUTES = int(os.getenv("LOG_LOOKBACK_MINUTES", "15"))
 
-SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.15"))
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.2"))
 
 # Below this distance AND with a matching reported filename, an error is
 # treated as an exact repeat (Tier 1). Must stay well under
