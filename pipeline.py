@@ -33,8 +33,23 @@ def process_log(log_data: dict) -> dict:
     embedding, embedding_tokens = embeddings.get_embedding(text)
 
     # Scoped to this service so two unrelated services don't dedup against
-    # each other's similar-looking generic errors.
-    match = db.find_similar_error(embedding, service_name=service_name)
+    # each other's similar-looking generic errors. Always returns the nearest
+    # row (if any exist yet for this service) regardless of distance — logged
+    # unconditionally below so EXACT_MATCH_THRESHOLD/SIMILARITY_THRESHOLD can
+    # be tuned by trial and error against real numbers, not just the ones
+    # that happened to cross whatever threshold is set today.
+    nearest = db.find_similar_error(embedding, service_name=service_name)
+    if nearest:
+        log.info(
+            "process_log: service=%r nearest_distance=%.4f nearest_id=%d nearest_filename=%r "
+            "(exact<=%.4f, similar<=%.4f)",
+            service_name, nearest["distance"], nearest["id"], nearest["filename"],
+            config.EXACT_MATCH_THRESHOLD, config.SIMILARITY_THRESHOLD,
+        )
+    else:
+        log.info("process_log: service=%r nearest_distance=none (no prior errors for this service)", service_name)
+
+    match = nearest if nearest and nearest["distance"] <= config.SIMILARITY_THRESHOLD else None
 
     if match:
         # Tier 1 — exact duplicate: near-zero distance AND same reported
@@ -155,4 +170,5 @@ def process_log(log_data: dict) -> dict:
         "source_files": source_files,
         "solution": solution,
         "repo": repo,
+        "nearest_distance": nearest["distance"] if nearest else None,
     }

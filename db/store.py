@@ -54,17 +54,21 @@ def get_repo_mapping(service_name: str):
     return {"repo": repo, "path_prefix": path_prefix, "default_branch": default_branch}
 
 
-def find_similar_error(embedding, service_name: str = None, threshold: float = None):
+def find_similar_error(embedding, service_name: str = None):
     """
-    Returns the closest existing row if its cosine distance is under `threshold`,
-    else None. Distance 0 = identical, larger = less similar.
+    Returns the closest existing row for this service by cosine distance, or
+    None if the service has no rows yet. Distance 0 = identical, larger =
+    less similar.
+
+    Deliberately does NOT filter by a threshold — always returns the nearest
+    row regardless of how far away it is, so the caller (pipeline.py) can log
+    the real distance for tuning config.EXACT_MATCH_THRESHOLD/
+    SIMILARITY_THRESHOLD even on errors that don't end up matching anything.
 
     Scoped to service_name when provided — two different services returning a
     similar-looking generic error (e.g. "connection timed out") shouldn't be
     deduped against each other.
     """
-    threshold = threshold if threshold is not None else config.SIMILARITY_THRESHOLD
-
     if service_name:
         query = """
             SELECT id, suggested_solution, occurrence_count,
@@ -97,8 +101,6 @@ def find_similar_error(embedding, service_name: str = None, threshold: float = N
 
     (error_id, suggested_solution, occurrence_count, distance,
      filename, source_file, source_files, error_type, endpoint, raw_log) = row
-    if distance > threshold:
-        return None
 
     return {
         "id": error_id,

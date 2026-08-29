@@ -136,6 +136,13 @@ with tab_submit:
 
         elif result and result["status"] == "new":
             st.success(f"**New error** — stored as row `{result['id']}`")
+            if result.get("nearest_distance") is not None:
+                st.caption(
+                    f"Nearest existing error for this service: distance `{result['nearest_distance']:.4f}` "
+                    f"— above both thresholds, so treated as new."
+                )
+            else:
+                st.caption("No prior errors stored for this service yet.")
             if not result.get("repo"):
                 st.warning(f"No `service_repo_map` entry for `{log.get('service_name')}` — no code context was available.")
             if result["source_files"]:
