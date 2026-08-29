@@ -44,29 +44,47 @@ Two tabs:
 - **Submit an error** — pick a sample log (a 503 timeout with a full trace,
   a trace-less null-reference, and a fully generic error, one for each
   retrieval tier) or paste your own, and run it through the real pipeline.
-  Shows whether it was a duplicate (with the cosine distance) or new, which
-  retrieval tier grounded the fix, and the solution itself.
+  Shows whether it was a duplicate, adapted, or new (with the cosine
+  distance), which retrieval tier grounded the fix, and the solution itself.
 - **History** — every row in Postgres so far, most recent first, with the
-  full solution and retrieval tier per error.
+  full solution and resolution/retrieval tier per error.
 
 This calls the same `pipeline.process_log()` that `main.py` uses — no
 separate demo logic, so what you see in the UI is exactly what the batch
 job would have done.
 
-## How it decides "duplicate" vs "new"
+## How it decides "duplicate" vs "adapted" vs "new"
 
 Each error is normalized (`error_type | endpoint | message`) and embedded
-with OpenAI (`text-embedding-3-small` by default). A new error is compared
-against every stored error via cosine distance (`db.store.find_similar_error`).
-Below `SIMILARITY_THRESHOLD` (`.env`, default `0.15`) it's treated as a
-repeat: occurrence count goes up, the stored solution is reused, and the
-chat model is never called. Above threshold, it's genuinely new and goes
-through the full pipeline.
+with OpenAI (`text-embedding-3-small` by default), then compared against the
+nearest existing row for the same service via cosine distance
+(`db.store.find_similar_error`). What happens next depends on that distance
+and whether the reported `filename` matches the matched row's:
 
-**Tune the threshold before trusting it.** Run the bot against a batch of
+1. **Duplicate** (distance ≤ `EXACT_MATCH_THRESHOLD`, `.env`, default `0.02`,
+   AND same reported filename as the matched row) — occurrence count goes
+   up, the stored solution is reused as-is, and no chat model is called at
+   all.
+2. **Adapted** (distance between `EXACT_MATCH_THRESHOLD` and
+   `SIMILARITY_THRESHOLD`, OR within `EXACT_MATCH_THRESHOLD` but a
+   *different* filename — e.g. the same error shape recurring in a new
+   file) — one deterministic, non-agentic lookup (`github_agent.resolve_seed`,
+   no LLM cost) tries to fetch the new file's own code, then a single
+   tools-free call to a cheaper model (`OPENAI_ADAPT_MODEL`, default
+   `gpt-4.1-mini`) adapts the matched row's solution to the new error/file.
+   Grounded in the new file's real code when it can be resolved; otherwise
+   falls back to a text-only, explicitly-flagged-as-unverified adaptation.
+   Stored as a **new** row with `resolution_tier='adapted'` and
+   `reference_error_id` pointing at the row it was adapted from.
+3. **New** (distance above `SIMILARITY_THRESHOLD`, `.env`, default `0.15`,
+   or no rows yet for this service) — the full agentic GitHub-retrieval
+   diagnosis runs as before, using `OPENAI_CHAT_MODEL`. Stored with
+   `resolution_tier='new'`.
+
+**Tune the thresholds before trusting them.** Run the bot against a batch of
 real logs, print the distances in `db.store.find_similar_error`, and eyeball
-where true duplicates vs. genuinely different errors land — 0.15 is a
-starting point, not a calibrated value.
+where true duplicates / near-duplicates / genuinely different errors land —
+`0.02` and `0.15` are starting points, not calibrated values.
 
 ## Adding more services
 

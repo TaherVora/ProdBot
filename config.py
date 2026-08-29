@@ -16,6 +16,7 @@ DATABASE_URL = _require("DATABASE_URL")
 OPENAI_API_KEY = _require("OPENAI_API_KEY")
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1")
+OPENAI_ADAPT_MODEL = os.getenv("OPENAI_ADAPT_MODEL", "gpt-4.1-mini")
 
 GITHUB_TOKEN = _require("GITHUB_TOKEN")
 
@@ -24,6 +25,11 @@ CLOUD_RUN_SERVICE = os.getenv("CLOUD_RUN_SERVICE", "voc-trending")
 LOG_LOOKBACK_MINUTES = int(os.getenv("LOG_LOOKBACK_MINUTES", "15"))
 
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.15"))
+
+# Below this distance AND with a matching reported filename, an error is
+# treated as an exact repeat (Tier 1). Must stay well under
+# SIMILARITY_THRESHOLD, which is now the *outer* bound for Tier 2 ("adapted").
+EXACT_MATCH_THRESHOLD = float(os.getenv("EXACT_MATCH_THRESHOLD", "0.02"))
 
 # Hard caps so a search_code tool call can never balloon into scanning the repo.
 MAX_SEARCH_RESULTS = 10

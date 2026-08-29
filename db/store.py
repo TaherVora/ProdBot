@@ -68,7 +68,8 @@ def find_similar_error(embedding, service_name: str = None, threshold: float = N
     if service_name:
         query = """
             SELECT id, suggested_solution, occurrence_count,
-                   embedding <=> %s::vector AS distance
+                   embedding <=> %s::vector AS distance,
+                   filename, source_file, source_files, error_type, endpoint, raw_log
             FROM error_logs
             WHERE service_name = %s
             ORDER BY distance ASC
@@ -78,7 +79,8 @@ def find_similar_error(embedding, service_name: str = None, threshold: float = N
     else:
         query = """
             SELECT id, suggested_solution, occurrence_count,
-                   embedding <=> %s::vector AS distance
+                   embedding <=> %s::vector AS distance,
+                   filename, source_file, source_files, error_type, endpoint, raw_log
             FROM error_logs
             ORDER BY distance ASC
             LIMIT 1;
@@ -93,7 +95,8 @@ def find_similar_error(embedding, service_name: str = None, threshold: float = N
     if row is None:
         return None
 
-    error_id, suggested_solution, occurrence_count, distance = row
+    (error_id, suggested_solution, occurrence_count, distance,
+     filename, source_file, source_files, error_type, endpoint, raw_log) = row
     if distance > threshold:
         return None
 
@@ -102,6 +105,12 @@ def find_similar_error(embedding, service_name: str = None, threshold: float = N
         "suggested_solution": suggested_solution,
         "occurrence_count": occurrence_count,
         "distance": distance,
+        "filename": filename,
+        "source_file": source_file,
+        "source_files": source_files,
+        "error_type": error_type,
+        "endpoint": endpoint,
+        "raw_log": raw_log,
     }
 
 
@@ -120,7 +129,8 @@ def increment_occurrence(error_id: int):
 def list_errors(limit: int = 100):
     query = """
         SELECT id, service_name, repo, raw_log, error_type, endpoint, filename, line,
-               source_file, source_files, suggested_solution, occurrence_count, first_seen, last_seen
+               source_file, source_files, suggested_solution, occurrence_count, first_seen, last_seen,
+               resolution_tier, reference_error_id
         FROM error_logs
         ORDER BY last_seen DESC
         LIMIT %s;
@@ -134,12 +144,14 @@ def list_errors(limit: int = 100):
 
 def insert_error(raw_log, error_type, endpoint, filename, line, embedding,
                   suggested_solution, source_file,
-                  service_name=None, repo=None, source_files=None):
+                  service_name=None, repo=None, source_files=None,
+                  resolution_tier="new", reference_error_id=None):
     query = """
         INSERT INTO error_logs
             (service_name, repo, raw_log, error_type, endpoint, filename, line,
-             embedding, suggested_solution, source_file, source_files)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             embedding, suggested_solution, source_file, source_files,
+             resolution_tier, reference_error_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id;
     """
     with get_connection() as conn:
@@ -147,5 +159,6 @@ def insert_error(raw_log, error_type, endpoint, filename, line, embedding,
             cur.execute(query, (
                 service_name, repo, raw_log, error_type, endpoint, filename, line,
                 embedding, suggested_solution, source_file, source_files,
+                resolution_tier, reference_error_id,
             ))
             return cur.fetchone()[0]

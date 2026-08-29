@@ -266,3 +266,82 @@ def diagnose(
         "prompt_tokens": total_prompt_tokens,
         "completion_tokens": total_completion_tokens,
     }
+
+
+_ADAPT_SYSTEM_PROMPT = """You are a solution architect for a backend service. A new error has \
+just come in that is similar in shape to an error already diagnosed before, but not identical \
+(e.g. it may be occurring in a different file). You have NO tools for this call — work only \
+from the reference solution and, if given, the new file's own source.
+
+- If the new file's source is provided below, it's real and line-numbered — ground your fix in \
+  it and cite the exact line with "Line <N>:", the same way a from-scratch diagnosis would.
+- If no source is provided for the new file, you have nothing to verify against — give a \
+  general, pattern-based recommendation based on the reference solution, do not invent a \
+  specific line number or fabricate code you haven't seen, and say explicitly that this is an \
+  unverified, best-effort adaptation of a past fix rather than a fresh diagnosis.
+- If the reference fix clearly still applies as-is, say so briefly and restate it rather than \
+  padding.
+- Concise: a short diagnosis then a concrete recommended fix, no preamble.
+"""
+
+
+def adapt_solution(
+    raw_log: str, error_type: str | None, endpoint: str | None, filename: str | None,
+    reference_solution: str, reference_source_file: str | None,
+    reference_source_files: list[str] | None,
+    new_file_code: str | None = None, new_file_source: str | None = None,
+    service_name: str | None = None,
+) -> dict:
+    """
+    Tier 2: a single, tools-free chat call on config.OPENAI_ADAPT_MODEL (cheaper
+    than OPENAI_CHAT_MODEL). Grounded in the new error's own file when
+    new_file_code is provided (fetched via a single deterministic
+    github_agent.resolve_seed() lookup by the caller — no agentic tool loop);
+    otherwise falls back to a text-only adaptation of the reference solution.
+
+    Returns {"solution": str, "prompt_tokens": int, "completion_tokens": int}.
+    """
+    context_header = f"Service: {service_name or 'unknown'}\nError log:\n{raw_log}"
+    if error_type:
+        context_header += f"\nError type: {error_type}"
+    if endpoint:
+        context_header += f"\nEndpoint: {endpoint}"
+    if filename:
+        context_header += f"\nReported filename: {filename}"
+
+    ref_files = reference_source_files or ([reference_source_file] if reference_source_file else [])
+    ref_files_text = ", ".join(f"`{f}`" for f in ref_files) if ref_files else "none recorded"
+
+    if new_file_code:
+        new_file_section = (
+            f"\n\nThe new error's own file ({new_file_source}), line-numbered:\n{new_file_code}"
+        )
+    else:
+        new_file_section = "\n\nNo source could be located for the new error's file."
+
+    user_content = (
+        f"{context_header}\n\n"
+        f"Reference — a similar past error was previously diagnosed with this solution "
+        f"(source file(s) referenced there: {ref_files_text}):\n"
+        f"{reference_solution}"
+        f"{new_file_section}\n\n"
+        f"Adapt the reference solution for the new error above."
+    )
+
+    response = _client.chat.completions.create(
+        model=config.OPENAI_ADAPT_MODEL,
+        max_tokens=1024,
+        messages=[
+            {"role": "system", "content": _ADAPT_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+    )
+    solution = response.choices[0].message.content
+    prompt_tokens = completion_tokens = 0
+    if response.usage:
+        prompt_tokens = response.usage.prompt_tokens
+        completion_tokens = response.usage.completion_tokens
+        log.info("adapt_solution: service=%r grounded=%s tokens: prompt=%d completion=%d total=%d",
+                  service_name, bool(new_file_code), prompt_tokens, completion_tokens,
+                  response.usage.total_tokens)
+    return {"solution": solution, "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}

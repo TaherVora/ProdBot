@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS error_logs (
     source_file         TEXT,               -- github path resolved from `filename`/search, if any
     source_files        TEXT[],             -- every file the retrieval step (seed + agentic tool loop) pulled in; source_file is source_files[1] when non-null
 
+    -- dedup tier audit trail
+    resolution_tier     TEXT NOT NULL DEFAULT 'new',  -- 'exact_duplicate' | 'adapted' | 'new'
+    reference_error_id  INT REFERENCES error_logs(id), -- for 'adapted' rows, the row whose solution was adapted
+
     -- cost-saving bookkeeping
     occurrence_count    INT NOT NULL DEFAULT 1,
     first_seen          TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -50,6 +54,10 @@ CREATE TABLE IF NOT EXISTS error_logs (
 -- Safe to re-run against a database created before source_files existed
 -- (CREATE TABLE IF NOT EXISTS above is a no-op once the table already exists).
 ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS source_files TEXT[];
+
+-- Safe to re-run against a database created before the 3-tier dedup redesign.
+ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS resolution_tier TEXT NOT NULL DEFAULT 'new';
+ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS reference_error_id INT REFERENCES error_logs(id);
 
 -- Approximate nearest-neighbor index for cosine distance search.
 -- ivfflat needs a rebuild (REINDEX) once you have real data volume; fine as-is for a POC.

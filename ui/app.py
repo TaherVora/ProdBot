@@ -113,9 +113,25 @@ with tab_submit:
             st.info(
                 f"**Duplicate detected** — matched existing row `{result['matched_id']}` "
                 f"(cosine distance `{result['distance']:.4f}`). "
-                f"Now seen **{result['occurrence_count']}×**. Claude was *not* called."
+                f"Now seen **{result['occurrence_count']}×**. Chat model was *not* called."
             )
+            if result.get("source_files"):
+                files = ", ".join(f"`{f}`" for f in result["source_files"])
+                st.markdown(f"**Code context (from original diagnosis):** {files}")
             st.markdown("**Reused solution:**")
+            st.write(result["solution"])
+
+        elif result and result["status"] == "adapted":
+            st.warning(
+                f"**Adapted from a similar past error** — row `{result['id']}` inserted, "
+                f"adapted from row `{result['reference_id']}` (cosine distance "
+                f"`{result['distance']:.4f}`)."
+            )
+            if result.get("source_file"):
+                st.markdown(f"**Code context:** 🟢 grounded — `{result['source_file']}`")
+            else:
+                st.markdown("**Code context:** 🔴 ungrounded — treat this as an unverified suggestion")
+            st.markdown("**Adapted solution:**")
             st.write(result["solution"])
 
         elif result and result["status"] == "new":
@@ -146,7 +162,10 @@ with tab_history:
         st.caption("No errors stored yet — submit one in the first tab.")
     else:
         for row in rows:
-            title = f"#{row['id']} · {row['service_name'] or '?'} · {row['error_type'] or '?'} · seen {row['occurrence_count']}×"
+            title = (
+                f"#{row['id']} · {row['service_name'] or '?'} · {row['error_type'] or '?'} · "
+                f"seen {row['occurrence_count']}× · [{row['resolution_tier']}]"
+            )
             with st.expander(title):
                 c1, c2, c3 = st.columns(3)
                 c1.markdown(f"**Repo:** {row['repo'] or '—'}")
@@ -158,6 +177,8 @@ with tab_history:
                 if row.get("source_files") and len(row["source_files"]) > 1:
                     others = ", ".join(f"`{f}`" for f in row["source_files"])
                     st.markdown(f"**All files considered:** {others}")
+                if row.get("reference_error_id"):
+                    st.caption(f"Adapted from row {row['reference_error_id']}")
                 st.markdown("**Raw log:**")
                 st.code(row["raw_log"])
                 st.markdown("**Suggested solution:**")
