@@ -25,12 +25,12 @@ CLOUD_RUN_SERVICE = os.getenv("CLOUD_RUN_SERVICE", "cricket-fever")
 LOG_LOOKBACK_MINUTES = int(os.getenv("LOG_LOOKBACK_MINUTES", "15"))
 
 # Email notifications (optional — skipped if SMTP_HOST/NOTIFY_EMAIL_TO aren't set)
-SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "vorataher53@gmail.com")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-SMTP_FROM_ADDRESS = os.getenv("SMTP_FROM_ADDRESS", "")
-NOTIFY_EMAIL_TO = [a.strip() for a in os.getenv("NOTIFY_EMAIL_TO", "").split(",") if a.strip()]
+SMTP_FROM_ADDRESS = os.getenv("SMTP_FROM_ADDRESS", "vorataher53@gmail.com")
+NOTIFY_EMAIL_TO = [a.strip() for a in os.getenv("NOTIFY_EMAIL_TO", "vorataher53@gmail.com").split(",") if a.strip()]
 
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.2"))
 
