@@ -51,25 +51,7 @@ CREATE TABLE IF NOT EXISTS error_logs (
     last_seen           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Safe to re-run against a database created before source_files existed
--- (CREATE TABLE IF NOT EXISTS above is a no-op once the table already exists).
-ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS source_files TEXT[];
-
--- Safe to re-run against a database created before the 3-tier dedup redesign.
-ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS resolution_tier TEXT NOT NULL DEFAULT 'new';
-ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS reference_error_id INT REFERENCES error_logs(id);
-
--- Switching to text-embedding-3-large (3072-dim) from text-embedding-3-small
--- (1536-dim) — existing embeddings are incompatible at a different
--- dimension, so this is a clean cutover: clear old rows, drop the old index
--- (built for 1536 dims — see note below on why it's not rebuilt), widen the
--- column. No-op on a fresh database (table is already created at 3072 dims
--- above, nothing to truncate/alter).
-TRUNCATE TABLE error_logs;
-DROP INDEX IF EXISTS error_logs_embedding_idx;
-ALTER TABLE error_logs ALTER COLUMN embedding TYPE vector(3072);
-
--- No vector index on `embedding` while it's 3072-dim (text-embedding-3-large):
+-- No vector index on `embedding` at 3072-dim (text-embedding-3-large):
 -- pgvector's ivfflat/hnsw indexes cap out at 2000 dimensions for the plain
 -- `vector` type (storage itself has no such limit, only indexing does).
 -- Cosine search falls back to a sequential scan + sort, which is fine at POC
